@@ -1,0 +1,47 @@
+@import url('https://fonts.googleapis.com/css2?family=Sarabun:wght@300;400;500;600;700&display=swap');
+
+body {
+    font-family: 'TH Sarabun PSK', 'Sarabun', sans-serif;
+}
+
+/* ตราประทับสำเนาสีแดงมุมบนขวาตามเงื่อนไข */
+.copy-stamp {
+    position: absolute;
+    top: 15mm;
+    right: 15mm;
+    border: 3px dashed #ef4444;
+    color: #ef4444;
+    padding: 5px 15px;
+    font-size: 20pt;
+    font-weight: bold;
+    transform: rotate(5deg);
+    border-radius: 5px;
+    display: none;
+}
+
+.is-copy .copy-stamp {
+    display: block;
+}
+
+/* ลอจิกการจัดหน้าพิมพ์ ปพ. ออกทางเครื่องพิมพ์จริง */
+@media print {
+    body * {
+        visibility: hidden;
+    }
+    #print-section, #print-section * {
+        visibility: visible;
+    }
+    #print-section {
+        position: absolute;
+        left: 0;
+        top: 0;
+        width: 210mm;
+        height: 297mm;
+        background: white;
+        padding: 20mm 15mm;
+        box-sizing: border-box;
+    }
+    .no-print {
+        display: none !important;
+    }
+}
