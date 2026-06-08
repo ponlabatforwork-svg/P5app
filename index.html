@@ -1,0 +1,685 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ระบบบริหารจัดการและพิมพ์ระเบียนแสดงผลการเรียน</title>
+    
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    
+    <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+    
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.2/papaparse.min.js"></script>
+
+    <style>
+        body { font-family: 'TH Sarabun PSK', 'Sarabun', sans-serif; }
+        .stepper-item.active .stepper-circle { background-color: #3b82f6; color: white; }
+        .stepper-item.success .stepper-circle { background-color: #10b981; color: white; }
+        .stepper-item.danger .stepper-circle { background-color: #ef4444; color: white; }
+        
+        /* สไตล์หน้าพิมพ์ PDF (A4 ขนาดเป๊ะ) */
+        @media print {
+            body * { visibility: hidden; }
+            #print-section, #print-section * { visibility: visible; }
+            #print-section { position: absolute; left: 0; top: 0; width: 210mm; height: 297mm; background: white; padding: 20mm 15mm; }
+            .no-print { display: none !important; }
+        }
+        
+        /* ตราประทับสำเนาสีแดงมุมบนขวา */
+        .copy-stamp {
+            position: absolute;
+            top: 15mm;
+            right: 15mm;
+            border: 3px dashed #ef4444;
+            color: #ef4444;
+            padding: 5px 15px;
+            font-size: 20pt;
+            font-weight: bold;
+            transform: rotate(5deg);
+            border-radius: 5px;
+            display: none;
+        }
+        .is-copy .copy-stamp { display: block; }
+    </style>
+</head>
+<body class="bg-slate-50 min-h-screen text-slate-800">
+
+    <div id="login-view" class="flex items-center justify-center min-h-screen px-4">
+        <div class="bg-white p-8 rounded-2xl shadow-xl max-w-md w-full border border-slate-100">
+            <div class="text-center mb-8">
+                <span class="text-4xl">📝</span>
+                <h1 class="text-2xl font-bold text-slate-900 mt-2">ระบบระเบียนผลการเรียน</h1>
+                <p class="text-slate-500 text-sm">โรงเรียนอนุบาลพัทลุง</p>
+            </div>
+            <form id="login-form" class="space-y-5">
+                <div>
+                    <label class="block text-sm font-semibold mb-1">ชื่อผู้ใช้ (Username)</label>
+                    <input type="text" id="login-username" required class="w-full px-4 py-2 border rounded-xl focus:ring-2 focus:ring-blue-500 outline-none">
+                </div>
+                <div>
+                    <label class="block text-sm font-semibold mb-1">รหัสผ่าน (Password)</label>
+                    <input type="password" id="login-password" required class="w-full px-4 py-2 border rounded-xl focus:ring-2 focus:ring-blue-500 outline-none">
+                </div>
+                <button type="submit" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2.5 rounded-xl transition shadow-lg shadow-blue-100">เข้าสู่ระบบ</button>
+            </form>
+        </div>
+    </div>
+
+    <div id="main-view" class="hidden">
+        <nav class="bg-white border-b border-slate-200 sticky top-0 z-50 no-print">
+            <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+                <div class="flex justify-between h-16 items-center">
+                    <div class="flex items-center space-x-3">
+                        <span class="text-2xl">🏫</span>
+                        <div>
+                            <span class="font-bold text-slate-900 block leading-tight">ระบบระเบียนผลการเรียน</span>
+                            <span class="text-xs text-slate-500" id="current-school-display">โรงเรียนอนุบาลพัทลุง</span>
+                        </div>
+                    </div>
+                    <div class="flex items-center space-x-4">
+                        <div class="text-right">
+                            <span class="font-semibold text-sm block" id="user-display-name">...</span>
+                            <span class="text-xs bg-slate-100 px-2.5 py-0.5 rounded-full text-slate-600 font-medium" id="user-display-role">...</span>
+                        </div>
+                        <button id="btn-logout" class="text-sm bg-rose-50 hover:bg-rose-100 text-rose-600 font-semibold px-3 py-1.5 rounded-xl transition">ออกจากระบบ</button>
+                    </div>
+                </div>
+            </div>
+        </nav>
+
+        <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 no-print">
+            
+            <div id="panel-teacher" class="hidden space-y-6">
+                <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+                    <h2 class="text-xl font-bold text-slate-900">จัดการข้อมูลนักเรียนและผลการเรียน</h2>
+                    <div class="flex gap-2">
+                        <button onclick="downloadCSVTemplate()" class="bg-slate-200 hover:bg-slate-300 text-slate-700 font-medium px-4 py-2 rounded-xl text-sm transition">⬇️ โหลดเทมเพลต CSV</button>
+                        <label class="bg-indigo-600 hover:bg-indigo-700 text-white font-medium px-4 py-2 rounded-xl text-sm transition cursor-pointer">
+                            📁 นำเข้าด้วย CSV <input type="file" id="csv-file-input" accept=".csv" class="hidden" onchange="importCSV(event)">
+                        </label>
+                        <button onclick="openStudentModal()" class="bg-blue-600 hover:bg-blue-700 text-white font-medium px-4 py-2 rounded-xl text-sm transition">➕ เพิ่มนักเรียนใหม่</button>
+                    </div>
+                </div>
+                <div class="bg-white rounded-2xl shadow-sm border overflow-hidden">
+                    <table class="w-full text-left border-collapse">
+                        <thead class="bg-slate-50 text-slate-600 text-sm font-semibold border-b">
+                            <tr>
+                                <th class="p-4">รหัสประจำตัว</th>
+                                <th class="p-4">ชื่อ-สกุล</th>
+                                <th class="p-4">ชั้น</th>
+                                <th class="p-4">สถานะการอนุมัติเอกสาร</th>
+                                <th class="p-4 text-right">การจัดการ</th>
+                            </tr>
+                        </thead>
+                        <tbody id="teacher-student-table" class="divide-y text-sm text-slate-700">
+                            </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div id="panel-registrar" class="hidden space-y-6">
+                <h2 class="text-xl font-bold text-slate-900">รายการคำขอตรวจสอบและลงนาม (ฝ่ายทะเบียน)</h2>
+                <div class="bg-white rounded-2xl shadow-sm border overflow-hidden">
+                    <table class="w-full text-left border-collapse">
+                        <thead class="bg-slate-50 text-slate-600 text-sm font-semibold border-b">
+                            <tr>
+                                <th class="p-4">รหัสประจำตัว</th>
+                                <th class="p-4">ชื่อ-สกุล</th>
+                                <th class="p-4">ชั้น</th>
+                                <th class="p-4">สถานะ</th>
+                                <th class="p-4 text-right">ตรวจสอบ</th>
+                            </tr>
+                        </thead>
+                        <tbody id="registrar-table" class="divide-y text-sm text-slate-700"></tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div id="panel-director" class="hidden space-y-6">
+                <div class="flex border-b border-slate-200">
+                    <button onclick="switchDirectorTab('approve')" id="tab-dir-approve" class="border-b-2 border-blue-600 py-2 px-4 text-sm font-bold text-blue-600">✍️ รายการรออนุมัติและลงนาม</button>
+                    <button onclick="switchDirectorTab('users')" id="tab-dir-users" class="border-b-2 border-transparent py-2 px-4 text-sm font-medium text-slate-500 hover:text-slate-700">👤 จัดการผู้ใช้งานระบบ</button>
+                </div>
+
+                <div id="director-approve-section" class="space-y-4">
+                    <div class="bg-white rounded-2xl shadow-sm border overflow-hidden">
+                        <table class="w-full text-left border-collapse">
+                            <thead class="bg-slate-50 text-slate-600 text-sm font-semibold border-b">
+                                <tr>
+                                    <th class="p-4">รหัสประจำตัว</th>
+                                    <th class="p-4">ชื่อ-สกุล</th>
+                                    <th class="p-4">ชั้น</th>
+                                    <th class="p-4">สถานะ</th>
+                                    <th class="p-4 text-right">ตรวจสอบ</th>
+                                </tr>
+                            </thead>
+                            <tbody id="director-table" class="divide-y text-sm text-slate-700"></tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <div id="director-users-section" class="hidden space-y-4">
+                    <div class="bg-white p-6 rounded-2xl border shadow-sm max-w-xl">
+                        <h3 class="text-lg font-bold mb-4">➕ เพิ่มผู้เข้าใช้งานใหม่ (ครู / ทะเบียน)</h3>
+                        <form id="add-user-form" class="space-y-4">
+                            <div class="grid grid-columns-1 sm:grid-cols-2 gap-4">
+                                <div>
+                                    <label class="block text-xs font-semibold mb-1">สิทธิ์การใช้งาน</label>
+                                    <select id="new-user-role" class="w-full px-3 py-2 border rounded-xl text-sm outline-none">
+                                        <option value="teacher">คุณครู</option>
+                                        <option value="registrar">ฝ่ายทะเบียน</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label class="block text-xs font-semibold mb-1">คำนำหน้าชื่อ</label>
+                                    <select id="new-user-title" class="w-full px-3 py-2 border rounded-xl text-sm outline-none">
+                                        <option value="นาย">นาย</option>
+                                        <option value="นาง">นาง</option>
+                                        <option value="นางสาว">นางสาว</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <div class="grid grid-columns-1 sm:grid-cols-2 gap-4">
+                                <div>
+                                    <label class="block text-xs font-semibold mb-1">ชื่อผู้ใช้ (Username)</label>
+                                    <input type="text" id="new-user-username" required class="w-full px-3 py-2 border rounded-xl text-sm outline-none">
+                                </div>
+                                <div>
+                                    <label class="block text-xs font-semibold mb-1">รหัสผ่าน (Password)</label>
+                                    <input type="password" id="new-user-password" required class="w-full px-3 py-2 border rounded-xl text-sm outline-none">
+                                </div>
+                            </div>
+                            <div>
+                                <label class="block text-xs font-semibold mb-1">ชื่อ-นามสกุล</label>
+                                <input type="text" id="new-user-name" required class="w-full px-3 py-2 border rounded-xl text-sm outline-none" placeholder="ไม่ต้องใส่คำนำหน้า">
+                            </div>
+                            <button type="submit" class="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-semibold py-2 rounded-xl text-sm transition">สร้างบัญชีผู้ใช้</button>
+                        </form>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <div id="print-section" class="hidden">
+        <div class="copy-stamp">สำเนา</div>
+        <div class="flex justify-between items-center mb-6">
+            <div class="text-sm leading-tight w-2/5" id="p-school-address">...</div>
+            <div class="text-center w-1/5"><img id="p-school-logo" src="" class="h-16 mx-auto"></div>
+            <div class="text-right w-2/5 leading-tight">
+                <h2 class="text-lg font-bold">ระเบียนแสดงผลการเรียน</h2>
+                <h3 class="text-md" id="p-school-name">...</h3>
+            </div>
+        </div>
+        <div class="border-t border-b border-black py-2 my-4 text-sm grid grid-cols-2 gap-2">
+            <div>ชื่อ-สกุล: <span id="p-student-name" class="font-bold">...</span></div>
+            <div>รหัสประจำตัว: <span id="p-student-id">...</span></div>
+            <div>ชั้น: <span id="p-student-class">...</span></div>
+            <div>เลขประจำตัวประชาชน: <span id="p-student-citizen">...</span></div>
+        </div>
+        <div class="text-center my-20 text-slate-400 font-medium">[ โครงสร้างข้อมูลใบ ปพ. หน้าที่ 1 และหน้าที่ 2 ]</div>
+        <div class="absolute bottom-10 left-10 right-10 text-xs border-t pt-2 flex justify-between" id="p-footer">
+            <span id="p-footer-text">พิมพ์เมื่อวันที่...</span>
+            <span>หน้า 1/2</span>
+        </div>
+    </div>
+
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+        import { getFirestore, doc, getDoc, setDoc, collection, getDocs, updateDoc, deleteDoc } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+
+        // Firebase Config จากระบบของคุณ
+        const firebaseConfig = {
+          apiKey: "AIzaSyC2LO8ZwG94bJ-EOveiFOdlMFnv2wJ_ixM",
+          authDomain: "pp5sh-7c41b.firebaseapp.com",
+          projectId: "pp5sh-7c41b",
+          storageBucket: "pp5sh-7c41b.firebasestorage.app",
+          messagingSenderId: "846527421476",
+          appId: "1:846527421476:web:61f3c97f5ebd6764458cb1",
+          measurementId: "G-BE87XY81TK"
+        };
+
+        const app = initializeApp(firebaseConfig);
+        const db = getFirestore(app);
+
+        // ตัวแปรเก็บเซสชันผู้ใช้ปัจจุบัน
+        let currentUser = null;
+
+        // รายชื่อบัญชีหลักเริ่มต้นตามกำหนดเงื่อนไข (Fallback หากไม่มีใน Firestore)
+        const defaultUsers = {
+            "sxaiq54": { password: "sxxnga2011", name: "นางสาวมัลติกา จันทร์คง", role: "teacher" },
+            "tt01": { password: "12345", name: "นายเพชรยุทธ์ ยอดทราย", role: "registrar" },
+            "ty1234": { password: "112233", name: "นายเพชร สงข์ยุทธ", role: "director" }
+        };
+
+        // 1. ระเบียบล็อกอินตรวจสอบสิทธิ์
+        document.getElementById('login-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const u = document.getElementById('login-username').value.trim();
+            const p = document.getElementById('login-password').value;
+
+            // ตรวจสอบใน Firestore ก่อน หากไม่มีให้วิ่งหาบัญชีเริ่มต้น (Fallback)
+            let userFound = null;
+            try {
+                const userDoc = await getDoc(doc(db, "users", u));
+                if (userDoc.exists() && userDoc.data().password === p) {
+                    userFound = userDoc.data();
+                }
+            } catch (err) { console.log("Firebase reading user, fallback used."); }
+
+            if (!userFound && defaultUsers[u] && defaultUsers[u].password === p) {
+                userFound = defaultUsers[u];
+            }
+
+            if (userFound) {
+                currentUser = userFound;
+                document.getElementById('login-view').classList.add('hidden');
+                document.getElementById('main-view').classList.remove('hidden');
+                document.getElementById('user-display-name').innerText = userFound.name;
+                
+                let roleThai = "คุณครูผู้สอน";
+                if(userFound.role === 'registrar') roleThai = "ฝ่ายทะเบียน";
+                if(userFound.role === 'director') roleThai = "ผู้อำนวยการสถานศึกษา";
+                document.getElementById('user-display-role').innerText = roleThai;
+
+                loadPanelByRole(userFound.role);
+                Swal.fire({ icon: 'success', title: 'ยินดีต้อนรับ', text: userFound.name, timer: 1500, showConfirmButton: false });
+            } else {
+                Swal.fire({ icon: 'error', title: 'ผิดพลาด', text: 'ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง!' });
+            }
+        });
+
+        // ออกจากระบบ
+        document.getElementById('btn-logout').addEventListener('click', () => {
+            currentUser = null;
+            document.getElementById('main-view').classList.add('hidden');
+            document.getElementById('login-view').classList.remove('hidden');
+            document.getElementById('login-form').reset();
+        });
+
+        // 2. จัดการหน้าแผงควบคุมตามตำแหน่งงาน
+        function loadPanelByRole(role) {
+            document.getElementById('panel-teacher').classList.add('hidden');
+            document.getElementById('panel-registrar').classList.add('hidden');
+            document.getElementById('panel-director').classList.add('hidden');
+
+            if (role === 'teacher') {
+                document.getElementById('panel-teacher').classList.remove('hidden');
+                fetchTeacherStudents();
+            } else if (role === 'registrar') {
+                document.getElementById('panel-registrar').classList.remove('hidden');
+                fetchRegistrarQueue();
+            } else if (role === 'director') {
+                document.getElementById('panel-director').classList.remove('hidden');
+                fetchDirectorQueue();
+            }
+        }
+
+        // 3. ฟังก์ชันสร้างเลขไทยอัตโนมัติสำหรับเอกสารราชการไทย
+        function toThaiNumerals(str) {
+            const thaiNums = ['๐','๑','๒','๓','๔','๕','๖','๗','๘','๙'];
+            return str.toString().replace(/[0-9]/g, c => thaiNums[c]);
+        }
+
+        // 4. แผงควบคุมของ [ คุณครู ]
+        async function fetchTeacherStudents() {
+            const tbody = document.getElementById('teacher-student-table');
+            tbody.innerHTML = `<tr><td colspan="5" class="p-4 text-center">กำลังโหลดข้อมูล...</td></tr>`;
+            
+            const querySnapshot = await getDocs(collection(db, "students"));
+            tbody.innerHTML = '';
+            
+            if(querySnapshot.empty) {
+                tbody.innerHTML = `<tr><td colspan="5" class="p-4 text-center text-slate-400">ยังไม่มีข้อมูลนักเรียนในระบบ</td></tr>`;
+                return;
+            }
+
+            querySnapshot.forEach((docSnap) => {
+                const s = docSnap.data();
+                const id = docSnap.id;
+                const status = s.status || 'draft';
+                
+                let stepperHTML = renderHorizontalStepper(status, s.reject_reason);
+                let btnActionHTML = '';
+
+                // เงื่อนไขปุ่มลอจิกการส่งพิจารณาและสั่งพิมพ์ PDF ตามสถานะที่ระบุ
+                if (status === 'draft' || status === 'rejected_by_registrar' || status === 'rejected_by_director_to_teacher') {
+                    btnActionHTML = `
+                        <button onclick="window.submitToRegistrar('${id}')" class="bg-amber-500 hover:bg-amber-600 text-white px-2.5 py-1 rounded-lg text-xs font-semibold mr-1">ส่งตรวจ</button>
+                        <button onclick="window.deleteStudent('${id}')" class="bg-rose-500 hover:bg-rose-600 text-white px-2.5 py-1 rounded-lg text-xs font-semibold">ลบ</button>
+                    `;
+                } else if (status === 'approved') {
+                    btnActionHTML = `
+                        <button onclick="window.printPDF('${id}', false)" class="bg-emerald-600 hover:bg-emerald-700 text-white px-2.5 py-1 rounded-lg text-xs font-semibold mr-1">พิมพ์ต้นฉบับ</button>
+                        <button onclick="window.printPDF('${id}', true)" class="bg-rose-600 hover:bg-rose-700 text-white px-2.5 py-1 rounded-lg text-xs font-semibold">พิมพ์สำเนา</button>
+                    `;
+                } else {
+                    btnActionHTML = `<span class="text-xs text-slate-400 italic font-medium">กำลังตรวจสอบ/ล็อกการแก้ไข</span>`;
+                }
+
+                tbody.innerHTML += `
+                    <tr class="hover:bg-slate-50">
+                        <td class="p-4 font-semibold">${s.student_id}</td>
+                        <td class="p-4">${s.name}</td>
+                        <td class="p-4">${s.class}</td>
+                        <td class="p-4">${stepperHTML}</td>
+                        <td class="p-4 text-right">${btnActionHTML}</td>
+                    </tr>
+                `;
+            });
+        }
+
+        // ตัวสร้าง Horizontal Stepper ในตารางสำหรับแสดงผลแนวนอนเป็นขั้นตอนชัดเจน
+        function renderHorizontalStepper(status, reason) {
+            let steps = [
+                { label: 'ร่าง', state: 'normal' },
+                { label: 'ตรวจโดยทะเบียน', state: 'normal' },
+                { label: 'อนุมัติโดย ผอ.', state: 'normal' }
+            ];
+
+            if (status === 'draft') steps[0].state = 'active';
+            if (status === 'pending_registrar') { steps[0].state = 'success'; steps[1].state = 'active'; }
+            if (status === 'pending_director') { steps[0].state = 'success'; steps[1].state = 'success'; steps[2].state = 'active'; }
+            if (status === 'approved') { steps[0].state = 'success'; steps[1].state = 'success'; steps[2].state = 'success'; }
+            
+            if (status === 'rejected_by_registrar') { steps[0].state = 'danger'; steps[1].state = 'normal'; }
+            if (status === 'rejected_by_director_to_registrar') { steps[0].state = 'success'; steps[1].state = 'danger'; }
+            if (status === 'rejected_by_director_to_teacher') { steps[0].state = 'danger'; steps[1].state = 'normal'; }
+
+            let html = `<div class="flex items-center space-x-2 text-xs">`;
+            steps.forEach((st, idx) => {
+                let badgeClass = "bg-slate-200 text-slate-600";
+                if(st.state === 'active') badgeClass = "bg-blue-600 text-white font-bold";
+                if(st.state === 'success') badgeClass = "bg-emerald-600 text-white";
+                if(st.state === 'danger') badgeClass = "bg-rose-500 text-white font-bold";
+
+                html += `<span class="px-2 py-0.5 rounded-md ${badgeClass}">${st.label}</span>`;
+                if(idx < 2) html += `<span class="text-slate-300">➔</span>`;
+            });
+            if(reason) html += `<div class="text-rose-500 text-[11px] mt-0.5 font-medium">⚠️ เหตุผลตีกลับ: ${reason}</div>`;
+            html += `</div>`;
+            return html;
+        }
+
+        // ลอจิกครูส่งงานให้ฝ่ายทะเบียน
+        window.submitToRegistrar = async (id) => {
+            await updateDoc(doc(db, "students", id), { status: "pending_registrar", reject_reason: "" });
+            Swal.fire('สำเร็จ', 'ส่งข้อมูลให้ฝ่ายทะเบียนตรวจสอบแล้ว', 'success');
+            fetchTeacherStudents();
+        };
+
+        // ลบข้อมูลนักเรียน
+        window.deleteStudent = async (id) => {
+            const res = await Swal.fire({ title: 'ยืนยันการลบ?', text: "ข้อมูลนักเรียนจะถูกลบออกจากฐานข้อมูล", icon: 'warning', showCancelButton: true });
+            if(res.isConfirmed) {
+                await deleteDoc(doc(db, "students", id));
+                fetchTeacherStudents();
+            }
+        };
+
+        // 5. แผงควบคุมของ [ ฝ่ายทะเบียน ]
+        async function fetchRegistrarQueue() {
+            const tbody = document.getElementById('registrar-table');
+            tbody.innerHTML = '';
+            const querySnapshot = await getDocs(collection(db, "students"));
+            
+            querySnapshot.forEach((docSnap) => {
+                const s = docSnap.data();
+                const id = docSnap.id;
+                // ฝ่ายทะเบียนเห็นงานที่ส่งมา หรือกรณี ผอ. ตีกลับมาหาฝ่ายทะเบียนโดยเฉพาะ
+                if(s.status === 'pending_registrar' || s.status === 'rejected_by_director_to_registrar') {
+                    tbody.innerHTML += `
+                        <tr>
+                            <td class="p-4">${s.student_id}</td>
+                            <td class="p-4 font-semibold">${s.name}</td>
+                            <td class="p-4">${s.class}</td>
+                            <td class="p-4"><span class="text-amber-600 font-medium">${s.status==='pending_registrar'?'รอตรวจ':'⚠️ ผอ. ตีกลับมา'}</span></td>
+                            <td class="p-4 text-right">
+                                <button onclick="window.reviewRegistrar('${id}', '${s.name}')" class="bg-blue-600 text-white px-3 py-1 rounded-xl text-xs font-semibold">🔍 ตรวจสอบ</button>
+                            </td>
+                        </tr>
+                    `;
+                }
+            });
+        }
+
+        window.reviewRegistrar = async (id, name) => {
+            const { value: action } = await Swal.fire({
+                title: `ตรวจสอบข้อมูล: ${name}`,
+                text: "กรุณาเลือกดำเนินการกับข้อมูลระเบียนชุดนี้",
+                icon: 'question',
+                showCancelButton: true,
+                confirmButtonText: '✍️ เซ็นและส่งให้ ผอ.',
+                denyButtonText: '❌ ตีกลับให้ครูแก้ไข',
+                showDenyButton: true,
+                confirmButtonColor: '#10b981',
+                denyButtonColor: '#ef4444'
+            });
+
+            if (Swal.getConfirmedButton() && action) {
+                await updateDoc(doc(db, "students", id), { status: "pending_director" });
+                Swal.fire('สำเร็จ', 'เซ็นกำกับและส่งต่อไปยัง ผอ. เรียบร้อย', 'success');
+                fetchRegistrarQueue();
+            } else if (Swal.getDeniedButton() || action === false) {
+                const { value: reason } = await Swal.fire({
+                    title: 'ระบุเหตุผลการตีกลับ',
+                    input: 'text',
+                    inputPlaceholder: 'กรอกเหตุผลให้คุณครูแก้ไข...',
+                    inputValidator: (value) => !value && 'จำเป็นต้องใส่เหตุผลการตีกลับ!'
+                });
+                if(reason) {
+                    await updateDoc(doc(db, "students", id), { status: "rejected_by_registrar", reject_reason: reason });
+                    Swal.fire('ส่งคืนแล้ว', 'ส่งกลับไปที่หน้าคุณครูผู้สอนเพื่อแก้ไข', 'info');
+                    fetchRegistrarQueue();
+                }
+            }
+        };
+
+        // 6. แผงควบคุมของ [ ผู้อำนวยการสถานศึกษา ]
+        async function fetchDirectorQueue() {
+            const tbody = document.getElementById('director-table');
+            tbody.innerHTML = '';
+            const querySnapshot = await getDocs(collection(db, "students"));
+            
+            querySnapshot.forEach((docSnap) => {
+                const s = docSnap.data();
+                const id = docSnap.id;
+                if(s.status === 'pending_director') {
+                    tbody.innerHTML += `
+                        <tr>
+                            <td class="p-4">${s.student_id}</td>
+                            <td class="p-4 font-semibold">${s.name}</td>
+                            <td class="p-4">${s.class}</td>
+                            <td class="p-4"><span class="text-indigo-600 font-medium">รอการอนุมัติลงนาม</span></td>
+                            <td class="p-4 text-right">
+                                <button onclick="window.reviewDirector('${id}', '${s.name}')" class="bg-blue-600 text-white px-3 py-1 rounded-xl text-xs font-semibold">🔍 อนุมัติ/ส่งคืน</button>
+                            </td>
+                        </tr>
+                    `;
+                }
+            });
+        }
+
+        window.reviewDirector = async (id, name) => {
+            const result = await Swal.fire({
+                title: `การพิจารณาของ ผอ.: ${name}`,
+                icon: 'warning',
+                showCancelButton: true,
+                showDenyButton: true,
+                confirmButtonText: '🖋️ อนุมัติเสร็จสิ้น (พิมพ์ได้)',
+                denyButtonText: '❌ ตีกลับแก้ไข',
+                confirmButtonColor: '#10b981',
+                denyButtonColor: '#ef4444'
+            });
+
+            if(result.isConfirmed) {
+                await updateDoc(doc(db, "students", id), { status: "approved" });
+                Swal.fire('อนุมัติแล้ว', 'เอกสารได้รับการอนุมัติ คุณครูสามารถสั่งพิมพ์ได้แล้ว', 'success');
+                fetchDirectorQueue();
+            } else if(result.isDenied) {
+                // ตัวเลือกการตีกลับจำแนกตามความต้องการของคุณ
+                const { value: target } = await Swal.fire({
+                    title: 'ต้องการตีกลับไปที่ใคร?',
+                    input: 'radio',
+                    inputOptions: {
+                        'teacher': 'ตีกลับไปที่ คุณครู (ฝ่ายทะเบียนดูได้อย่างเดียว)',
+                        'registrar': 'ตีกลับไปที่ ฝ่ายทะเบียน (คุณครูดูได้อย่างเดียว)'
+                    },
+                    inputValidator: (value) => !value && 'กรุณาเลือกเป้าหมายการตีกลับ!'
+                });
+
+                if(target) {
+                    const { value: reason } = await Swal.fire({
+                        title: 'เหตุผลการตีกลับของ ผอ.',
+                        input: 'text',
+                        inputPlaceholder: 'กรอกรายละเอียดข้อผิดพลาด...',
+                        inputValidator: (value) => !value && 'ต้องระบุเหตุผล!'
+                    });
+
+                    if(reason) {
+                        let finalStatus = target === 'teacher' ? 'rejected_by_director_to_teacher' : 'rejected_by_director_to_registrar';
+                        await updateDoc(doc(db, "students", id), { status: finalStatus, reject_reason: reason });
+                        Swal.fire('ส่งคืนสำเร็จ', 'ส่งข้อมูลกลับตามสายงานเรียบร้อย', 'info');
+                        fetchDirectorQueue();
+                    }
+                }
+            }
+        };
+
+        // ระบบเพิ่มผู้ใช้ใหม่ของ ผอ.
+        document.getElementById('add-user-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const role = document.getElementById('new-user-role').value;
+            const title = document.getElementById('new-user-title').value;
+            const username = document.getElementById('new-user-username').value.trim();
+            const password = document.getElementById('new-user-password').value;
+            const name = document.getElementById('new-user-name').value.trim();
+
+            await setDoc(doc(db, "users", username), {
+                password: password,
+                name: `${title}${name}`,
+                role: role
+            });
+
+            Swal.fire('สำเร็จ', `สร้างบัญชีผู้ใช้งานระบบสิทธิ์ ${role} สำเร็จ`, 'success');
+            document.getElementById('add-user-form').reset();
+        });
+
+        // แท็บควบคุม ผอ.
+        window.switchDirectorTab = (tab) => {
+            if(tab === 'approve') {
+                document.getElementById('director-approve-section').classList.remove('hidden');
+                document.getElementById('director-users-section').classList.add('hidden');
+                document.getElementById('tab-dir-approve').className = "border-b-2 border-blue-600 py-2 px-4 text-sm font-bold text-blue-600";
+                document.getElementById('tab-dir-users').className = "border-b-2 border-transparent py-2 px-4 text-sm font-medium text-slate-500 hover:text-slate-700";
+                fetchDirectorQueue();
+            } else {
+                document.getElementById('director-approve-section').classList.add('hidden');
+                document.getElementById('director-users-section').classList.remove('hidden');
+                document.getElementById('tab-dir-approve').className = "border-b-2 border-transparent py-2 px-4 text-sm font-medium text-slate-500 hover:text-slate-700";
+                document.getElementById('tab-dir-users').className = "border-b-2 border-blue-600 py-2 px-4 text-sm font-bold text-blue-600";
+            }
+        };
+
+        // 7. ระบบการพิมพ์ PDF เอกสารระเบียนคู่ฉบับ
+        window.printPDF = async (id, isCopy) => {
+            const docSnap = await getDoc(doc(db, "students", id));
+            if(!docSnap.exists()) return;
+            const s = docSnap.data();
+
+            const pSection = document.getElementById('print-section');
+            if(isCopy) pSection.classList.add('is-copy');
+            else pSection.classList.remove('is-copy');
+
+            // หยอดข้อมูลลงในช่องว่างของระเบียนฟอร์มพิมพ์
+            document.getElementById('p-school-name').innerText = "โรงเรียนอนุบาลพัทลุง";
+            document.getElementById('p-school-address').innerText = "เลขที่ 45 ถนนสุรินทร์ ตำบลคูหาสวรรค์ อำเภอเมืองพัทลุง จังหวัดพัทลุง 93000";
+            document.getElementById('p-school-logo').src = "https://upload.wikimedia.org/wikipedia/commons/thumb/0/06/Garuda_Emblem_of_Thailand_%28Alternative%29.svg/1200px-Garuda_Emblem_of_Thailand_%28Alternative%29.svg.png";
+            
+            document.getElementById('p-student-name').innerText = s.name;
+            document.getElementById('p-student-id').innerText = s.student_id;
+            document.getElementById('p-student-class').innerText = s.class;
+            document.getElementById('p-student-citizen').innerText = s.citizen_id || '-';
+
+            // ฟอร์แมตวันพิมพ์ท้ายหน้าเป็นเลขไทยตามระเบียบ
+            const now = new Date();
+            const months = ["มกราคม", "กุมภาพันธ์", "มีนาคม", "เมษายน", "พฤษภาคม", "มิถุนายน", "กรกฎาคม", "สิงหาคม", "กันยายน", "ตุลาคม", "พฤศจิกายน", "ธันวาคม"];
+            let timeText = `พิมพ์เมื่อวันที่ ${now.getDate()} เดือน ${months[now.getMonth()]} พ.ศ. ${now.getFullYear()+543} เวลา ${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')} น. ผู้พิมพ์ ${currentUser.name}`;
+            document.getElementById('p-footer-text').innerText = toThaiNumerals(timeText);
+
+            window.print();
+        };
+
+        // 8. หน้าฟอร์มป๊อปอัปเพิ่มข้อมูลนักเรียนรายบุคคล
+        window.openStudentModal = async () => {
+            const { value: formValues } = await Swal.fire({
+                title: '➕ เพิ่มประวัตินักเรียนรายบุคคล',
+                html:
+                    '<input id="swal-sid" class="swal2-input" placeholder="รหัสประจำตัวนักเรียน">' +
+                    '<input id="swal-name" class="swal2-input" placeholder="ชื่อ - นามสกุล">' +
+                    '<input id="swal-class" class="swal2-input" placeholder="ชั้น เช่น ม.1/1 หรือ ป.6/2">',
+                focusConfirm: false,
+                preConfirm: () => {
+                    return {
+                        student_id: document.getElementById('swal-sid').value,
+                        name: document.getElementById('swal-name').value,
+                        class: document.getElementById('swal-class').value,
+                        status: 'draft'
+                    }
+                }
+            });
+
+            if (formValues && formValues.student_id && formValues.name) {
+                await setDoc(doc(db, "students", formValues.student_id), formValues);
+                Swal.fire('สำเร็จ', 'บันทึกข้อมูลนักเรียนใหม่ในสถานะ ร่าง เรียบร้อย', 'success');
+                fetchTeacherStudents();
+            }
+        };
+
+        // 9. ระบบโหลดไฟล์ต้นแบบ CSV Template
+        window.downloadCSVTemplate = () => {
+            let csvContent = "data:text/csv;charset=utf-8,student_id,name,class,citizen_id\n1001,เด็กชายสมชาย สายดี,ป.6/1,1234567890123\n1002,เด็กหญิงสมศรี มีสุข,ป.6/1,9876543210987";
+            var encodedUri = encodeURI(csvContent);
+            var link = document.createElement("a");
+            link.setAttribute("href", encodedUri);
+            link.setAttribute("download", "student_template.csv");
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        };
+
+        // 10. ระบบประมวลผลการนำเข้าข้อมูลนักเรียนแบบกลุ่มใหญ่ (Bulk Import via CSV)
+        window.importCSV = (event) => {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            Papa.parse(file, {
+                header: true,
+                skipEmptyLines: true,
+                complete: async function(results) {
+                    let count = 0;
+                    for(let row of results.data) {
+                        if(row.student_id && row.name) {
+                            await setDoc(doc(db, "students", row.student_id.trim()), {
+                                student_id: row.student_id.trim(),
+                                name: row.name.trim(),
+                                class: row.class ? row.class.trim() : '-',
+                                citizen_id: row.citizen_id ? row.citizen_id.trim() : '-',
+                                status: 'draft'
+                            });
+                            count++;
+                        }
+                    }
+                    Swal.fire('นำเข้าสำเร็จ', `โหลดข้อมูลนักเรียนจำนวน ${count} คน เข้าสู่สถานะร่างสำเร็จแล้ว`, 'success');
+                    fetchTeacherStudents();
+                    document.getElementById('csv-file-input').value = '';
+                }
+            });
+        };
+    </script>
+</body>
+</html>
